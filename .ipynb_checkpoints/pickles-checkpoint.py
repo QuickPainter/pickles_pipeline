@@ -41,70 +41,134 @@ def main(batch_number):
     """
 
     # check if candidates database is set up, if not then initialize it. This is where the candidates will be stored
-    batch_number = int(batch_number)
+
+
     block_size = 4096
     significance_level = 10
     main_dir = '/mnt_blpc1/datax/scratch/calebp/k_scores/'
 
-    # we will store the information for pickle in pickle_jar.csv
-    df_name = f'updated_all_cadences_mason_jar_batch_{batch_number}_block_size_{block_size}_snr_{significance_level}.csv'
+    
+    if isinstance(batch_number,int):
+        batch_number = int(batch_number)
+        # we will store the information for pickle in pickle_jar.csv
+        df_name = f'updated_all_cadences_mason_jar_batch_{batch_number}_block_size_{block_size}_snr_{significance_level}.csv'
 
-    db_exists = os.path.exists(main_dir+df_name)
-    if db_exists == False:
-        print(main_dir+df_name)
-        print("Creating candidates database as ",df_name)
-        feature_table = pd.DataFrame(columns=["All Files","Index","Block Size","Freq","obs1 maxes","obs3 maxes","obs5 maxes","ON_freq_int","k1","k2","k3","k4","k5","k6","k_score","min_k","med_k","max_k","drift1","drift2"])
-        feature_table.to_csv(main_dir+df_name,index=False)
+        db_exists = os.path.exists(main_dir+df_name)
+        if db_exists == False:
+            print(main_dir+df_name)
+            print("Creating candidates database as ",df_name)
+            feature_table = pd.DataFrame(columns=["All Files","Index","Block Size","Freq","obs1 maxes","obs3 maxes","obs5 maxes","ON_freq_int","k1","k2","k3","k4","k5","k6","k_score","min_k","med_k","max_k","drift1","drift2"])
+            feature_table.to_csv(main_dir+df_name,index=False)
+        else:
+            print("feature table database already exists:",main_dir+df_name)
+
+
     else:
-        print("feature table database already exists:",main_dir+df_name)
+        target_line = batch_number
+        n = len(target_line)
+        target_info = target_line[1:n-1]
+        target_info = target_info.split(',')
+        target_name = target_info[0]
+        target_date = target_info[1]
+        target_node = target_info[2]
 
-    # define batches
-    # batches = [['AND_I', 'AND_X', 'AND_XI', 'AND_XIV', 'AND_XVI', 'AND_XXIII', 'AND_XXIV', 'BOL520', 'CVNI', 'DDO210','DRACO', 'DW1','HERCULES', 'HIZSS003', 'IC0010', 'IC0342', 'IC1613', 'LEOA', 'LEOII', 'LEOT'],['LGS3', 'MAFFEI1', 'MAFFEI2', 'MESSIER031', 'MESSIER033', 'MESSIER081', 'MESSIER101', 'MESSIER49', 'MESSIER59', 'MESSIER84', 'MESSIER86', 'MESSIER87', 'NGC0185', 'NGC0628', 'NGC0672 ', 'NGC1052', 'NGC1172 ', 'NGC1400', 'NGC1407', 'NGC2403'],['NGC2683', 'NGC2787', 'NGC3193', 'NGC3226', 'NGC3344', 'NGC3379', 'NGC4136', 'NGC4168', 'NGC4239', 'NGC4244', 'NGC4258', 'NGC4318', 'NGC4365', 'NGC4387', 'NGC4434', 'NGC4458', 'NGC4473', 'NGC4478', 'NGC4486B', 'NGC4489'],['NGC4551', 'NGC4559', 'NGC4564', 'NGC4600', 'NGC4618', 'NGC4660', 'NGC4736', 'NGC4826', 'NGC5194', 'NGC5195', 'NGC5322', 'NGC5638', 'NGC5813', 'NGC5831', 'NGC584', 'NGC5845', 'NGC5846', 'NGC596', 'NGC636', 'NGC6503'],['NGC6822', 'NGC6946', 'NGC720', 'NGC7454 ', 'NGC7640', 'NGC821', 'PEGASUS', 'SAG_DIR', 'SEXA', 'SEXB', 'SEXDSPH', 'UGC04879', 'UGCA127', 'UMIN']]
+        
+        df_name = f'updated_target_{target_name}_date_{target_date}_node_{target_node}_blocksize_{block_size}_snr{significance_level}.csv'
+
+        db_exists = os.path.exists(main_dir+df_name)
+        if db_exists == False:
+            print(main_dir+df_name)
+            print("Creating candidates database as ",df_name)
+            feature_table = pd.DataFrame(columns=["All Files","Index","Block Size","Freq","obs1 maxes","obs3 maxes","obs5 maxes","ON_freq_int","k1","k2","k3","k4","k5","k6","k_score","min_k","med_k","max_k","drift1","drift2"])
+            feature_table.to_csv(main_dir+df_name,index=False)
+        else:
+            print("feature table database already exists:",main_dir+df_name)
+
+    
+
+
+    # db_exists = os.path.exists(main_dir+df_name)
+    # if db_exists == False:
+    #     print(main_dir+df_name)
+    #     print("Creating candidates database as ",df_name)
+    #     feature_table = pd.DataFrame(columns=["All Files","Index","Block Size","Freq","obs1 maxes","obs3 maxes","obs5 maxes","ON_freq_int","k1","k2","k3","k4","k5","k6","k_score","min_k","med_k","max_k","drift1","drift2"])
+    #     feature_table.to_csv(main_dir+df_name,index=False)
+    # else:
+    #     print("feature table database already exists:",main_dir+df_name)
+
     
     # load all cadences
     with open('/mnt_blpc1/datax/scratch/calebp/boundaries/cappuccino/all_batches_all_cadences_1000.pkl', 'rb') as f:
         reloaded_batches = pickle.load(f)
 
-
-
-
-    print(len(reloaded_batches))
     
-    specific_batch = reloaded_batches[batch_number]
-    feature_table = pd.read_csv(main_dir+df_name)
+    if isinstance(batch_number,int):
+        
+        print(len(reloaded_batches))
+        specific_batch = reloaded_batches[batch_number]
+        feature_table = pd.read_csv(main_dir+df_name)
+    
+        try:
+            # iterate through each node (cadence)
+            for i in range(0,len(specific_batch)):
+                print(f"Now on file {i} out of {len(specific_batch)}")
+                # load current csv of file properties
+                try:
+                    last_mason = pd.read_csv(main_dir+df_name)
+                    # grab the specific cadence to look at
+                    h5_files = specific_batch[i]
+                    # pass the files into the boundary_checker wrapper function. Returns flagged frequencies and respective scores
+                    print("Now running on file ",h5_files[0])
+                    k_score_table= pickler_wrapper((batch_number,i),h5_files,block_size,significance_level)
+    
+                    # append all flagged frequencies to the candidates database
+                    updated_mason = pd.concat([last_mason, k_score_table])
+                    updated_mason.to_csv(main_dir+df_name,index=False)
+    
+                    print(updated_mason)
+                except Exception:
+                    print("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
+                    print(f"XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX ERROR ON CADENCE {i} XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
+                    print("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
+                    print(traceback.print_exc())
+    
+    
+        except Exception:
+            print("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
+            print(f"XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX ERROR ON TARGET {batch_number} XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
+            print("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
+            print(traceback.print_exc())
 
-    try:
-        # iterate through each node (cadence)
-        for i in range(0,len(specific_batch)):
-            print(f"Now on file {i} out of {len(specific_batch)}")
-            # load current csv of file properties
-            try:
-                last_mason = pd.read_csv(main_dir+df_name)
-                # grab the specific cadence to look at
-                h5_files = specific_batch[i]
-                # pass the files into the boundary_checker wrapper function. Returns flagged frequencies and respective scores
-                print("Now running on file ",h5_files[0])
-                k_score_table= pickler_wrapper((batch_number,i),h5_files,block_size,significance_level)
+    else:
+        print("TARGET:",target_name,target_date,target_node)
+        all_file_paths = [find_cadence(target_name,target_date,target_node,reloaded_batches)]
+        try:
+            last_mason = pd.read_csv(main_dir+df_name)
+            # grab the specific cadence to look at
+            h5_files = all_file_paths[0]
+            # pass the files into the boundary_checker wrapper function. Returns flagged frequencies and respective scores
+            print("Now running on file ",h5_files[0])
+            k_score_table= pickler_wrapper((target_name,target_date),h5_files,block_size,significance_level)
 
-                # append all flagged frequencies to the candidates database
-                updated_mason = pd.concat([last_mason, k_score_table])
-                updated_mason.to_csv(main_dir+df_name,index=False)
+            # append all flagged frequencies to the candidates database
+            updated_mason = pd.concat([last_mason, k_score_table])
+            updated_mason.to_csv(main_dir+df_name,index=False)
 
-                print(updated_mason)
-            except Exception:
-                print("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
-                print(f"XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX ERROR ON CADENCE {i} XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
-                print("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
-                print(traceback.print_exc())
+            print(updated_mason)
+        except Exception:
+            print("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
+            print(f"XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX ERROR ON CADENCE {i} XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
+            print("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
+            print(traceback.print_exc())
 
 
-    except Exception:
-        print("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
-        print(f"XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX ERROR ON TARGET {batch_number} XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
-        print("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
-        print(traceback.print_exc())
-
-
+def find_cadence(target,time,node,reloaded_batches):
+    for batch in range(0,21):
+        for cadence in reloaded_batches[batch]:
+            combined_string = " ".join(cadence)
+            if combined_string.count(target) >= 3 and time in combined_string and node in combined_string:
+                return cadence
+                
 def pickler_wrapper(batch_info,h5_files,block_size,significance_level):
 
     # load data files, for ON and OFF observations
