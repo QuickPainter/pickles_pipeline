@@ -27,13 +27,11 @@ import pickle
 import math
 import gc
 from scipy.signal import find_peaks
-
-
+import itertools
 
 # from cappuccino.cappuccino.__init__ import *
 
-
-def main(batch_number):
+def main(batch_number, section_bool):
     """This is the main function.
 
     Args:
@@ -43,15 +41,15 @@ def main(batch_number):
     # check if candidates database is set up, if not then initialize it. This is where the candidates will be stored
 
 
-    block_size = 4096
+    block_size = 1024
     significance_level = 10
     main_dir = '/mnt_blpc1/datax/scratch/calebp/k_scores/'
 
     
-    if isinstance(batch_number,int):
+    if batch_number.isdigit():
         batch_number = int(batch_number)
         # we will store the information for pickle in pickle_jar.csv
-        df_name = f'updated_all_cadences_mason_jar_batch_{batch_number}_block_size_{block_size}_snr_{significance_level}.csv'
+        df_name = f'updated_all_cadences_mason_jar_batch_{batch_number}_block_size_{block_size}_snr_{significance_level}_section_{section_bool}.csv'
 
         db_exists = os.path.exists(main_dir+df_name)
         if db_exists == False:
@@ -119,7 +117,7 @@ def main(batch_number):
                     h5_files = specific_batch[i]
                     # pass the files into the boundary_checker wrapper function. Returns flagged frequencies and respective scores
                     print("Now running on file ",h5_files[0])
-                    k_score_table= pickler_wrapper((batch_number,i),h5_files,block_size,significance_level)
+                    k_score_table= pickler_wrapper((batch_number,i),h5_files,block_size,significance_level, section_bool)
     
                     # append all flagged frequencies to the candidates database
                     updated_mason = pd.concat([last_mason, k_score_table])
@@ -148,7 +146,7 @@ def main(batch_number):
             h5_files = all_file_paths[0]
             # pass the files into the boundary_checker wrapper function. Returns flagged frequencies and respective scores
             print("Now running on file ",h5_files[0])
-            k_score_table= pickler_wrapper((target_name,target_date),h5_files,block_size,significance_level)
+            k_score_table= pickler_wrapper((target_name,target_date),h5_files,block_size,significance_level,section_bool)
 
             # append all flagged frequencies to the candidates database
             updated_mason = pd.concat([last_mason, k_score_table])
@@ -169,7 +167,7 @@ def find_cadence(target,time,node,reloaded_batches):
             if combined_string.count(target) >= 3 and time in combined_string and node in combined_string:
                 return cadence
                 
-def pickler_wrapper(batch_info,h5_files,block_size,significance_level):
+def pickler_wrapper(batch_info,h5_files,block_size,significance_level,section_bool):
 
     # load data files, for ON and OFF observations
     hf_ON = h5py.File(h5_files[0], 'r')
@@ -188,9 +186,10 @@ def pickler_wrapper(batch_info,h5_files,block_size,significance_level):
     obs5_row_8 = np.squeeze(hf_ON3['data'][7:8,:,:])
 
 
+    freq_length_of_data = len(obs1_row_8)
 
     # find file frequency information
-    fch1,foff = get_file_properties(hf_ON)
+    fch1,foff,nchans = get_file_properties(hf_ON)
 
     # calculate number of iterations needed and find hotspots
     number = int(np.round(len(obs1_row_8)/block_size))
@@ -245,7 +244,6 @@ def pickler_wrapper(batch_info,h5_files,block_size,significance_level):
             interesting_extra_hotspots.append(spot)
 
 
-    print("Final # of cucumbers:",len(interesting_extra_hotspots))
 
     # check which hotsplot slice (which ON observation) gave the hotspot signal
     filtered_hotspots_slice_indexes = []
@@ -262,14 +260,21 @@ def pickler_wrapper(batch_info,h5_files,block_size,significance_level):
             if snr:
                 strong_signal_counter += 1
         if strong_signal_counter >= 2:
-            filtered_hotspots_slice_indexes.append(i)
             strong_filtered_hotspots.append(spot)
 
     # comine these with the overlapping by half ones
     final_filtered_hotspots = strong_filtered_hotspots+interesting_extra_hotspots
+    final_filtered_hotspots = list(np.sort(final_filtered_hotspots))
+    print("Final # of cucumbers:",len(final_filtered_hotspots))
 
     # this variable is more of a placeholder now, since all of the regions have a signal in each ON observation.
-    filtered_hotspots_slice_indexes = [0]*len(final_filtered_hotspots)
+    for spot in final_filtered_hotspots:
+        for i in range(0,len(hotspot_slices)):    
+            row = hotspot_slices[i]
+            slice_ON = row[int(spot*block_size):int((spot+1)*block_size):]
+            snr,threshold = get_snr(slice_ON,significance_level)
+            if snr:
+                filtered_hotspots_slice_indexes.append(i)
 
     # delete these for memory saving
     del hotspot_slices
@@ -277,61 +282,144 @@ def pickler_wrapper(batch_info,h5_files,block_size,significance_level):
     del obs3_row_8
     del obs1_row_8
 
-    print("Salting and Seasoning...")
-    k_score_table = get_k_scores(batch_info,hf_ON,hf_OFF,hf_ON2,hf_OFF2,hf_ON3,hf_OFF3,final_filtered_hotspots,h5_files,fch1,foff,filtered_hotspots_slice_indexes,block_size)
+    dt1 = datetime.datetime.now()
+
+    sectioning = section_bool
+    if sectioning == "True":
+        num_sections = 16
+        print(f"attempting to divide observation into {num_sections} sections")
     
+        sections = np.linspace(fch1,fch1+foff*nchans,num_sections)
+        section_blocks = np.round(abs((sections-fch1)/(block_size*foff)))
+        
+        observations = [hf_ON, hf_OFF, hf_ON2, hf_OFF2, hf_ON3, hf_OFF3]
+        indexes = final_filtered_hotspots
+        
+        print('section_blocks',section_blocks)
+
+        rounds_run = 0
+        k_score_table_data_full = []
+        for num in range(0,len(section_blocks)-1):
+            print(f"Now Running on Section {num} of {len(section_blocks)}")
+            print(f"Have completed {rounds_run}/{len(indexes)+rounds_run} indexes")
+            section = section_blocks[num+1]
+            round = np.array([x for x in indexes if x <= section])
+            rounds_run += len(round)
+            # print("Indexes targeted this round", round)
+            # print('Freqs',(round*block_size*foff)+fch1)
+            
+            indexes = set(indexes) - set(round)
+            round = round - section_blocks[num]
+        
+            sectioned_observations = []
+            lower = int(np.round(section_blocks[num]*block_size))
+            upper = int(np.round(section_blocks[num+1]*block_size))
+        
+        
+            if len(round) > 0:
+                for obs_data in tqdm(observations):
+                    section =  np.squeeze(obs_data['data'][:,:,lower:upper],axis=1)
+                    sectioned_observations.append(section)
+                    
+                round = list(round)
+                k_score_table_data = get_k_scores(batch_info,sectioned_observations[0],sectioned_observations[1],sectioned_observations[2],sectioned_observations[3],sectioned_observations[4],sectioned_observations[5],round,h5_files,fch1,foff,filtered_hotspots_slice_indexes,block_size,sectioning,section_blocks[num])
+
+                k_score_table_data_full.append(k_score_table_data)
+
+        print(len(k_score_table_data_full))
+        print(len(k_score_table_data_full[0]))
+
+        
+        k_score_table_data_full = list(itertools.chain.from_iterable(k_score_table_data_full))
+        k_score_table = pd.DataFrame(k_score_table_data_full, columns=["Batch Info","All Files","Index","Block Size","Freq","obs1 maxes","obs3 maxes","obs5 maxes","ON_freq_int","k1","k2","k3","k4","k5","k6","k_score","min_k","med_k","max_k","drift1","drift2"])
+
+                
+
+    elif sectioning == "False":
+        print("Salting and Seasoning...")
+        k_score_table = get_k_scores(batch_info,hf_ON,hf_OFF,hf_ON2,hf_OFF2,hf_ON3,hf_OFF3,final_filtered_hotspots,h5_files,fch1,foff,filtered_hotspots_slice_indexes,block_size,sectioning,0)
+
+    dt2 = datetime.datetime.now()
+    print('Elapsed Time',dt2 - dt1)
+
     return k_score_table
 
 
 
 
-def get_k_scores(batch_info,hf_obs1,hf_obs2,hf_obs3,hf_obs4,hf_obs5,hf_obs6,filtered_hotspots,file_list,fch1,foff,filtered_hotspots_indexes,block_size):
+def get_k_scores(batch_info,hf_obs1,hf_obs2,hf_obs3,hf_obs4,hf_obs5,hf_obs6,filtered_hotspots,file_list,fch1,foff,filtered_hotspots_indexes,block_size,sectioning,section_index):
     
     k_score_table = pd.DataFrame(columns=["Batch Info","All Files","Index","Block Size","Freq","obs1 maxes","obs3 maxes","obs5 maxes","ON_freq_int","k1","k2","k3","k4","k5","k6","k_score","min_k","med_k","max_k","drift1","drift2"])
     # we iterate through all of the hotspots
+    k_score_table_data = []
 
 
     for i in tqdm(filtered_hotspots):
 
         # define the block region we are looking at
         try:
-            lower = int(i * block_size)
-            upper = int((i+1) * block_size)
-
             hotspot_index = filtered_hotspots.index(i)
             hotspot_slice = filtered_hotspots_indexes[hotspot_index]
-
-            # get hit index
+            
+            lower = int(i * block_size)
+            upper = int((i+1) * block_size)
             observations_ON = [hf_obs1,hf_obs3,hf_obs5]
             primary_hf_ON = observations_ON[hotspot_slice]
-            row_ON = np.squeeze(primary_hf_ON['data'][-1:,:,lower:upper],axis=1)[0]
 
-            dt1 = datetime.datetime.now()
-            print('time start',dt1)
-                   
-            # load data of each hotspot
-            # integrate each one for more statistics
-            Obs1 = np.squeeze(hf_obs1['data'][:,:,lower:upper],axis=1)
-            obs1_int = Obs1.sum(axis=0)
+            if sectioning == "False":
+    
+                
+                # get hit index
+                row_ON = np.squeeze(primary_hf_ON['data'][-1:,:,lower:upper],axis=1)[0]
+    
+                       
+                # load data of each hotspot
+                # integrate each one for more statistics
+                Obs1 = np.squeeze(hf_obs1['data'][:,:,lower:upper],axis=1)
+                obs1_int = Obs1.sum(axis=0)
+    
+                Obs2 = np.squeeze(hf_obs2['data'][:,:,lower:upper],axis=1)
+                obs2_int = Obs2.sum(axis=0)
+    
+                Obs3 = np.squeeze(hf_obs3['data'][:,:,lower:upper],axis=1)
+                obs3_int = Obs3.sum(axis=0)
+    
+                Obs4 = np.squeeze(hf_obs4['data'][:,:,lower:upper],axis=1)
+                obs4_int = Obs4.sum(axis=0)
+    
+                Obs5 = np.squeeze(hf_obs5['data'][:,:,lower:upper],axis=1)
+                obs5_int = Obs5.sum(axis=0)
+    
+                Obs6 = np.squeeze(hf_obs6['data'][:,:,lower:upper],axis=1)
+                obs6_int = Obs6.sum(axis=0)
 
-            Obs2 = np.squeeze(hf_obs2['data'][:,:,lower:upper],axis=1)
-            obs2_int = Obs2.sum(axis=0)
+                frequency = fch1+foff*(i*block_size)
 
-            Obs3 = np.squeeze(hf_obs3['data'][:,:,lower:upper],axis=1)
-            obs3_int = Obs3.sum(axis=0)
+                dt1 = datetime.datetime.now()
+                print('time start',dt1)
 
-            Obs4 = np.squeeze(hf_obs4['data'][:,:,lower:upper],axis=1)
-            obs4_int = Obs4.sum(axis=0)
+            elif sectioning == "True":
+                Obs1 = hf_obs1[:,lower:upper]
+                Obs2 = hf_obs2[:,lower:upper]
+                Obs3 = hf_obs3[:,lower:upper]
+                Obs4 = hf_obs4[:,lower:upper]
+                Obs5 = hf_obs5[:,lower:upper] 
+                Obs6 = hf_obs6[:,lower:upper]
 
-            Obs5 = np.squeeze(hf_obs5['data'][:,:,lower:upper],axis=1)
-            obs5_int = Obs5.sum(axis=0)
+                row_ON = primary_hf_ON[-1,lower:upper]
 
-            Obs6 = np.squeeze(hf_obs6['data'][:,:,lower:upper],axis=1)
-            obs6_int = Obs6.sum(axis=0)
+                obs1_int = Obs1.sum(axis=0)
+                obs2_int = Obs2.sum(axis=0)
+                obs3_int = Obs3.sum(axis=0)
+                obs4_int = Obs4.sum(axis=0)
+                obs5_int = Obs5.sum(axis=0)
+                obs6_int = Obs6.sum(axis=0)    
+
+                frequency = fch1+foff*(i*block_size + section_index*block_size)
+
+
+                
             
-            dt1 = datetime.datetime.now()
-            print('time start',dt1)
-
             # sum the time-integrated data for certain statistics --> like looking for peaks of non-drifting signals
             on_sum = obs1_int+obs3_int+obs5_int
             off_sum = obs2_int+obs4_int+obs6_int
@@ -423,11 +511,17 @@ def get_k_scores(batch_info,hf_obs1,hf_obs2,hf_obs3,hf_obs4,hf_obs5,hf_obs6,filt
                 drift = 0
 
             
-            frequency = fch1+foff*(i*block_size)
             dt1 = datetime.datetime.now()
             print('time start',dt1.microsecond/1000)
 
-            k_score_table.loc[len(k_score_table.index)] = [batch_info,file_list,i,block_size,frequency,obs_time_maxes[0],obs_time_maxes[1],obs_time_maxes[2],[obs1_freq_int,obs3_freq_int,obs5_freq_int],k1,k2,k3,k4,k5,k6,k_score,min_k,med_k,max_k,drift,drifting]
+            if sectioning == "False":
+                k_score_table.loc[len(k_score_table.index)] = [batch_info,file_list,i,block_size,frequency,obs_time_maxes[0],obs_time_maxes[1],obs_time_maxes[2],[obs1_freq_int,obs3_freq_int,obs5_freq_int],k1,k2,k3,k4,k5,k6,k_score,min_k,med_k,max_k,drift,drifting]
+
+            if sectioning == "True":
+                k_score_table_data.append([batch_info,file_list,i,block_size,frequency,obs_time_maxes[0],obs_time_maxes[1],obs_time_maxes[2],[obs1_freq_int,obs3_freq_int,obs5_freq_int],k1,k2,k3,k4,k5,k6,k_score,min_k,med_k,max_k,drift,drifting])
+        
+        
+        
         except Exception:
             print("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
             print(f"XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX ERROR ON BLOCK {i} XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
@@ -435,7 +529,10 @@ def get_k_scores(batch_info,hf_obs1,hf_obs2,hf_obs3,hf_obs4,hf_obs5,hf_obs6,filt
             print(traceback.print_exc())
             k_score_table.loc[len(k_score_table.index)] = [batch_info,file_list,i,block_size,fch1+foff*(i*block_size),math.nan,math.nan,math.nan,math.nan,math.nan,math.nan,math.nan,math.nan,math.nan,math.nan,math.nan,math.nan,math.nan,math.nan,math.nan,math.nan]
 
-    return k_score_table
+    if sectioning == "False":
+        return k_score_table
+    elif sectioning == "True":
+        return k_score_table_data
 
 
 
@@ -519,7 +616,7 @@ def get_file_properties(f):
     # print("tstart %0.6f fch1 %0.10f foff %0.30f nchans %d cfreq %0.10f src_raj %0.10f src_raj_degs %0.10f src_dej %0.10f target %s" % (tstart,fch1,foff,nchans,(fch1+((foff*nchans)/2.0)),ra,ra*15.0,decl,target))
     print("Start Channel: %0.10f Frequency Bin: %0.30f # Channels: %d" % (fch1,foff,nchans))
 
-    return fch1, foff
+    return fch1, foff, nchans
 
 
 def find_hotspots(row,first_round,block_size,significance_level):
@@ -815,4 +912,5 @@ def get_node_file_list(data_dir,node_number):
 
 if __name__ == '__main__':
     batch_number = sys.argv[1]
-    main(batch_number)
+    section_bool = sys.argv[2]
+    main(batch_number, section_bool)
