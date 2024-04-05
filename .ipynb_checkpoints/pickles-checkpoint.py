@@ -28,6 +28,7 @@ import math
 import gc
 from scipy.signal import find_peaks
 import itertools
+import threading
 
 # from cappuccino.cappuccino.__init__ import *
 
@@ -286,7 +287,7 @@ def pickler_wrapper(batch_info,h5_files,block_size,significance_level,section_bo
 
     sectioning = section_bool
     if sectioning == "True":
-        num_sections = 16
+        num_sections = 8
         print(f"attempting to divide observation into {num_sections} sections")
     
         sections = np.linspace(fch1,fch1+foff*nchans,num_sections)
@@ -331,7 +332,7 @@ def pickler_wrapper(batch_info,h5_files,block_size,significance_level,section_bo
 
         
         k_score_table_data_full = list(itertools.chain.from_iterable(k_score_table_data_full))
-        k_score_table = pd.DataFrame(k_score_table_data_full, columns=["Batch Info","All Files","Index","Block Size","Freq","obs1 maxes","obs3 maxes","obs5 maxes","ON_freq_int","k1","k2","k3","k4","k5","k6","k_score","min_k","med_k","max_k","drift1","drift2"])
+        k_score_table = pd.DataFrame(k_score_table_data_full, columns=["Batch Info","All Files","Index","Block Size","Freq","obs1 maxes","obs3 maxes","obs5 maxes","ON_freq_int","k1","k2","k3","k4","k5","k6","k_score","min_k","med_k","max_k","drift1","drift2","blip or broadband"])
 
                 
 
@@ -345,11 +346,38 @@ def pickler_wrapper(batch_info,h5_files,block_size,significance_level,section_bo
     return k_score_table
 
 
+def read_file(obs_data):
+    return np.squeeze(obs_data['data'][:,:,lower:upper],axis=1)
+
+    
+def multi_threaded_file_reader(observations):
+    threads = []
+    results = []
+
+    # Define the worker function
+    def read_file_thread(file_path):
+        result = read_file(file_path)
+        results.append(result)
+
+    # Create and start threads
+    for obs_data in observations:
+        thread = threading.Thread(target=read_file_thread, args=(obs_data,))
+        threads.append(thread)
+        thread.start()
+
+    # Wait for all threads to finish
+    for thread in threads:
+        thread.join()
+
+    return results
+    
+    
+    
 
 
 def get_k_scores(batch_info,hf_obs1,hf_obs2,hf_obs3,hf_obs4,hf_obs5,hf_obs6,filtered_hotspots,file_list,fch1,foff,filtered_hotspots_indexes,block_size,sectioning,section_index):
     
-    k_score_table = pd.DataFrame(columns=["Batch Info","All Files","Index","Block Size","Freq","obs1 maxes","obs3 maxes","obs5 maxes","ON_freq_int","k1","k2","k3","k4","k5","k6","k_score","min_k","med_k","max_k","drift1","drift2"])
+    k_score_table = pd.DataFrame(columns=["Batch Info","All Files","Index","Block Size","Freq","obs1 maxes","obs3 maxes","obs5 maxes","ON_freq_int","k1","k2","k3","k4","k5","k6","k_score","min_k","med_k","max_k","drift1","drift2","blip or broadband"])
     # we iterate through all of the hotspots
     k_score_table_data = []
 
@@ -497,11 +525,12 @@ def get_k_scores(batch_info,hf_obs1,hf_obs2,hf_obs3,hf_obs4,hf_obs5,hf_obs6,filt
             drifting = True
 
             # check drift rate two ways
-            constant_peaks,peak_drift_1,peak_drift_2 = filter_zero_drift(Obs1,Obs2,Obs3,Obs4,Obs5,Obs6,3)
+            constant_peaks,peak_drift_1,peak_drift_2, peak_drift_3 = filter_zero_drift(Obs1,Obs2,Obs3,Obs4,Obs5,Obs6,3)
             peak_drift_1= abs(np.array(peak_drift_1))
             peak_drift_2 = abs(np.array(peak_drift_2))
+            peak_drift_3 = abs(np.array(peak_drift_3))
 
-            if np.any(peak_drift_1 < 4) or np.any(peak_drift_2 < 4):
+            if np.any(peak_drift_1 < 4) or np.any(peak_drift_2 < 4) or np.any(peak_drift_3 < 8):
                 drifting = False
 
             # check drift rate
@@ -515,10 +544,11 @@ def get_k_scores(batch_info,hf_obs1,hf_obs2,hf_obs3,hf_obs4,hf_obs5,hf_obs6,filt
             print('time start',dt1.microsecond/1000)
 
             if sectioning == "False":
-                k_score_table.loc[len(k_score_table.index)] = [batch_info,file_list,i,block_size,frequency,obs_time_maxes[0],obs_time_maxes[1],obs_time_maxes[2],[obs1_freq_int,obs3_freq_int,obs5_freq_int],k1,k2,k3,k4,k5,k6,k_score,min_k,med_k,max_k,drift,drifting]
+                k_score_table.loc[len(k_score_table.index)] = [batch_info,file_list,i,block_size,frequency,obs_time_maxes[0],obs_time_maxes[1],obs_time_maxes[2],[obs1_freq_int,obs3_freq_int,obs5_freq_int],k1,k2,k3,k4,k5,k6,k_score,min_k,med_k,max_k,drift,drifting,blip_or_broadband]
 
             if sectioning == "True":
-                k_score_table_data.append([batch_info,file_list,i,block_size,frequency,obs_time_maxes[0],obs_time_maxes[1],obs_time_maxes[2],[obs1_freq_int,obs3_freq_int,obs5_freq_int],k1,k2,k3,k4,k5,k6,k_score,min_k,med_k,max_k,drift,drifting])
+                i = i+ section_index
+                k_score_table_data.append([batch_info,file_list,i,block_size,frequency,obs_time_maxes[0],obs_time_maxes[1],obs_time_maxes[2],[obs1_freq_int,obs3_freq_int,obs5_freq_int],k1,k2,k3,k4,k5,k6,k_score,min_k,med_k,max_k,drift,drifting,blip_or_broadband])
         
         
         
@@ -527,7 +557,7 @@ def get_k_scores(batch_info,hf_obs1,hf_obs2,hf_obs3,hf_obs4,hf_obs5,hf_obs6,filt
             print(f"XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX ERROR ON BLOCK {i} XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
             print("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
             print(traceback.print_exc())
-            k_score_table.loc[len(k_score_table.index)] = [batch_info,file_list,i,block_size,fch1+foff*(i*block_size),math.nan,math.nan,math.nan,math.nan,math.nan,math.nan,math.nan,math.nan,math.nan,math.nan,math.nan,math.nan,math.nan,math.nan,math.nan,math.nan]
+            k_score_table.loc[len(k_score_table.index)] = [batch_info,file_list,i,block_size,fch1+foff*(i*block_size),math.nan,math.nan,math.nan,math.nan,math.nan,math.nan,math.nan,math.nan,math.nan,math.nan,math.nan,math.nan,math.nan,math.nan,math.nan,math.nan,math.nan]
 
     if sectioning == "False":
         return k_score_table
@@ -747,14 +777,18 @@ def filter_zero_drift(obs1,obs2,obs3,obs4,obs5,obs6,filtering_level):
 
     peak_drift_1 = []
     peak_drift_2 = []
+    peak_drift_3 = []
 
     if len(all_peak_freqs[1]) != 0:
         peak_drift_1 = find_closest_elements(all_peak_freqs[0],all_peak_freqs[1])
 
     if len(all_peak_freqs[2]) != 0:
         peak_drift_2 = find_closest_elements(all_peak_freqs[1],all_peak_freqs[2])
+        
+    if len(all_peak_freqs[2]) != 0:
+        peak_drift_3 = find_closest_elements(all_peak_freqs[0],all_peak_freqs[2])
 
-    return all_peaks[-1], peak_drift_1,peak_drift_2
+    return all_peaks[-1], peak_drift_1,peak_drift_2,peak_drift_3
 
 def find_closest_elements(a, b):
     result = []

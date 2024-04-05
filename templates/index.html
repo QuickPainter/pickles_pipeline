@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Plot Viewer</title>
+    <style>
+        /* Container holding the plot and the decision form side by side */
+        .container {
+            display: flex;
+            align-items: center; /* Align items vertically */
+        }
+        
+        /* Style for the Yes button */
+        .yes-button {
+            background-color: #4CAF50; /* Green */
+            color: white;
+            padding: 100px 120px; /* Larger size */
+            font-size: 30px;
+            border: none;
+            cursor: pointer;
+            margin: 4px 2px;
+        }
+
+        /* Style for the No button */
+        .no-button {
+            background-color: #f44336; /* Red */
+            color: white;
+            padding: 100px 120px; /* Larger size */
+            font-size: 30px;
+            border: none;
+            cursor: pointer;
+            margin: 4px 2px;
+        }
+
+        /* Ensures the buttons don't shrink smaller than their content */
+        button {
+            min-width: 100px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <img src="{{ url_for('serve_image', filename=plot_filename) }}" alt="Plot Image" width="700" height="900" style="margin-right: 20px;">
+        <form action="/decision" method="post">
+            <button type="submit" name="choice" value="Yes" class="yes-button">Yes</button>
+            <button type="submit" name="choice" value="No" class="no-button">No</button>
+        </form>
+    </div>
+    <script>
+        // Check if next_image_filename is provided to the template
+        {% if next_image_filename %}
+        const nextImageSrc = "{{ url_for('serve_image', filename=next_image_filename) }}";
+        const img = new Image();
+        img.src = nextImageSrc;
+        console.log("Preloading next image: " + nextImageSrc);
+        {% endif %}
+    </script>
+</body>
+</html>
